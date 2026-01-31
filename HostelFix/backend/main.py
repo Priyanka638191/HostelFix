@@ -25,7 +25,7 @@ app = FastAPI(
 )
 
 # CORS Configuration
-origins = os.getenv("CORS_ORIGINS", "http://localhost:3000","hostel-fix.vercel.app").split(",")
+origins = os.getenv("CORS_ORIGINS", "http://localhost:3000","https://hostelfix.vercel.app","https://hostel-fix.vercel.app/login").split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
