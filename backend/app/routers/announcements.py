@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List, Optional
+from typing import List
 from app.models import AnnouncementCreate, AnnouncementResponse
 from app.auth import get_current_user, get_current_admin
 from app.database import get_database
@@ -8,6 +8,7 @@ from datetime import datetime
 
 router = APIRouter()
 
+
 @router.post("/", response_model=AnnouncementResponse, status_code=status.HTTP_201_CREATED)
 async def create_announcement(
     announcement_data: AnnouncementCreate,
@@ -15,14 +16,14 @@ async def create_announcement(
 ):
     """Create announcement (admin only)"""
     db = get_database()
-    
+
     user = await db.users.find_one({"email": current_user})
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     announcement_doc = {
         "title": announcement_data.title,
         "content": announcement_data.content,
@@ -33,48 +34,48 @@ async def create_announcement(
         "created_by_name": user["name"],
         "created_at": datetime.utcnow()
     }
-    
+
     result = await db.announcements.insert_one(announcement_doc)
     announcement_doc["id"] = str(result.inserted_id)
     announcement_doc.pop("_id", None)
-    
+
     return AnnouncementResponse(**announcement_doc)
+
 
 @router.get("/", response_model=List[AnnouncementResponse])
 async def get_announcements(
     current_user: str = Depends(get_current_user)
 ):
-    """Get announcements (filtered by user's hostel/block if specified)"""
+    """Get announcements filtered by user's hostel/block"""
     db = get_database()
-    
+
     user = await db.users.find_one({"email": current_user})
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
-    # Build query for targeted announcements
+
     query = {
         "$or": [
-            {"target_hostel": None},  # General announcements
-            {"target_hostel": user.get("hostel")}  # Hostel-specific
+            {"target_hostel": None},
+            {"target_hostel": user.get("hostel")}
         ]
     }
-    
-    # If user has a block, also include block-specific announcements
+
     if user.get("block"):
         query["$or"].append({"target_block": user.get("block")})
-    
+
     announcements = await db.announcements.find(query).sort("created_at", -1).to_list(length=50)
-    
+
     result = []
     for announcement in announcements:
         announcement["id"] = str(announcement["_id"])
         announcement.pop("_id", None)
         result.append(AnnouncementResponse(**announcement))
-    
+
     return result
+
 
 @router.get("/{announcement_id}", response_model=AnnouncementResponse)
 async def get_announcement(
@@ -83,45 +84,46 @@ async def get_announcement(
 ):
     """Get single announcement"""
     db = get_database()
-    
+
     if not ObjectId.is_valid(announcement_id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid announcement ID"
         )
-    
+
     announcement = await db.announcements.find_one({"_id": ObjectId(announcement_id)})
     if not announcement:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Announcement not found"
         )
-    
+
     announcement["id"] = str(announcement["_id"])
     announcement.pop("_id", None)
-    
+
     return AnnouncementResponse(**announcement)
 
-@router.delete("/{announcement_id}")
+
+@router.delete("/{announcement_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_announcement(
     announcement_id: str,
     current_user: str = Depends(get_current_admin)
 ):
     """Delete announcement (admin only)"""
     db = get_database()
-    
+
     if not ObjectId.is_valid(announcement_id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid announcement ID"
         )
-    
+
     result = await db.announcements.delete_one({"_id": ObjectId(announcement_id)})
-    
+
     if result.deleted_count == 0:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Announcement not found"
         )
-    
-    return {"message": "Announcement deleted successfully"}
+
+    return
