@@ -9,6 +9,7 @@ from datetime import datetime
 
 router = APIRouter()
 
+
 @router.post("/", response_model=LostFoundResponse, status_code=status.HTTP_201_CREATED)
 async def create_lost_found(
     item_data: LostFoundCreate,
@@ -16,14 +17,14 @@ async def create_lost_found(
 ):
     """Create lost or found item"""
     db = get_database()
-    
+
     user = await db.users.find_one({"email": current_user})
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
         )
-    
+
     item_doc = {
         "item_name": item_data.item_name,
         "description": item_data.description,
@@ -38,12 +39,13 @@ async def create_lost_found(
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
     }
-    
+
     result = await db.lost_found.insert_one(item_doc)
     item_doc["id"] = str(result.inserted_id)
     item_doc.pop("_id", None)
-    
+
     return LostFoundResponse(**item_doc)
+
 
 @router.post("/upload-image")
 async def upload_lost_found_image(
@@ -56,9 +58,10 @@ async def upload_lost_found_image(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="File must be an image"
         )
-    
+
     image_url = await upload_image(file)
     return {"image_url": image_url}
+
 
 @router.get("/", response_model=List[LostFoundResponse])
 async def get_lost_found_items(
@@ -67,20 +70,21 @@ async def get_lost_found_items(
 ):
     """Get all lost/found items"""
     db = get_database()
-    
+
     query = {}
     if item_type:
         query["item_type"] = item_type
-    
+
     items = await db.lost_found.find(query).sort("created_at", -1).to_list(length=100)
-    
+
     result = []
     for item in items:
         item["id"] = str(item["_id"])
         item.pop("_id", None)
         result.append(LostFoundResponse(**item))
-    
+
     return result
+
 
 @router.get("/{item_id}", response_model=LostFoundResponse)
 async def get_lost_found_item(
@@ -89,24 +93,25 @@ async def get_lost_found_item(
 ):
     """Get single lost/found item"""
     db = get_database()
-    
+
     if not ObjectId.is_valid(item_id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid item ID"
         )
-    
+
     item = await db.lost_found.find_one({"_id": ObjectId(item_id)})
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Item not found"
         )
-    
+
     item["id"] = str(item["_id"])
     item.pop("_id", None)
-    
+
     return LostFoundResponse(**item)
+
 
 @router.post("/{item_id}/claim")
 async def claim_item(
@@ -115,26 +120,26 @@ async def claim_item(
 ):
     """Claim a lost/found item"""
     db = get_database()
-    
+
     if not ObjectId.is_valid(item_id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid item ID"
         )
-    
+
     item = await db.lost_found.find_one({"_id": ObjectId(item_id)})
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Item not found"
         )
-    
+
     if item.get("is_resolved"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Item already claimed"
         )
-    
+
     await db.lost_found.update_one(
         {"_id": ObjectId(item_id)},
         {
@@ -145,8 +150,9 @@ async def claim_item(
             }
         }
     )
-    
+
     return {"message": "Item claimed successfully"}
+
 
 @router.post("/{item_id}/approve-claim")
 async def approve_claim(
@@ -155,19 +161,61 @@ async def approve_claim(
 ):
     """Approve claim (admin only)"""
     db = get_database()
-    
+
     if not ObjectId.is_valid(item_id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid item ID"
         )
-    
+
     item = await db.lost_found.find_one({"_id": ObjectId(item_id)})
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Item not found"
         )
-    
-    # Item is already marked as resolved when claimed
+
     return {"message": "Claim approved"}
+
+
+@router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_lost_found_item(
+    item_id: str,
+    current_user: str = Depends(get_current_user)
+):
+    """
+    Delete lost/found item:
+    - Admin can delete any item
+    - Student can delete only items they created
+    """
+    db = get_database()
+
+    if not ObjectId.is_valid(item_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid item ID"
+        )
+
+    item = await db.lost_found.find_one({"_id": ObjectId(item_id)})
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Item not found"
+        )
+
+    user = await db.users.find_one({"email": current_user})
+
+    # Admin can delete anything
+    if user.get("role") == "admin":
+        await db.lost_found.delete_one({"_id": ObjectId(item_id)})
+        return
+
+    # Student can delete only their own items
+    if item["created_by"] != current_user:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can delete only items you created"
+        )
+
+    await db.lost_found.delete_one({"_id": ObjectId(item_id)})
+    return
